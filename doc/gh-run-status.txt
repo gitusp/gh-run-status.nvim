@@ -1,0 +1,125 @@
+*gh-run-status.txt*  Plugin for monitoring GitHub Actions runs in Neovim
+
+==============================================================================
+Table of Contents                                 *gh-run-status-table-contents*
+
+1. Introduction ................ |gh-run-status-introduction|
+2. Features ................... |gh-run-status-features|
+3. Requirements ............... |gh-run-status-requirements|
+4. Installation ............... |gh-run-status-installation|
+5. Usage ...................... |gh-run-status-usage|
+6. Health Check ............... |gh-run-status-health-check|
+7. Compatibility .............. |gh-run-status-compatibility|
+8. Acknowledgements ........... |gh-run-status-acknowledgements|
+
+==============================================================================
+1. Introduction                                     *gh-run-status-introduction*
+
+A Neovim plugin that monitors the status of GitHub Actions runs for the current
+branch.
+
+==============================================================================
+2. Features                                             *gh-run-status-features*
+
+- Automatically monitors GitHub Actions run status for the current branch
+- Caches status information to minimize API calls
+- Intelligently updates when branch changes
+- Provides status and conclusion information for UI integrations
+
+==============================================================================
+3. Requirements                                     *gh-run-status-requirements*
+
+- GitHub CLI (`gh`) installed and authenticated
+  https://cli.github.com/
+- Git repository connected to GitHub
+
+==============================================================================
+4. Installation                                     *gh-run-status-installation*
+
+Using lazy.nvim:
+>lua
+    {
+      'gitusp/gh-run-status.nvim',
+    }
+<
+
+==============================================================================
+5. Usage                                                 *gh-run-status-usage*
+
+Basic usage:
+>lua
+    -- Create a getter function with custom options (optional)
+    local get_status = require('gh-run-status').create_getter({
+      watch_branch_sleep_duration = 1000,  -- Check branch changes every 1 second
+      watch_status_sleep_duration = 10000, -- Check status changes every 10 seconds
+    })
+    
+    -- Get current GitHub Actions status
+    local status, conclusion = get_status('/path/to/your/repo')
+<
+
+Example lualine integration:                    *gh-run-status-lualine-example*
+>lua
+    {
+    'nvim-lualine/lualine.nvim',
+      dependencies = {
+        'nvim-tree/nvim-web-devicons',
+        'gitusp/gh-run-status.nvim',
+      },
+      config = function()
+        local get_gh_run_status = require('gh-run-status').create_getter()
+        local function gh_run_status()
+          local status, conclusion = get_gh_run_status(vim.fn.getcwd())
+          if not status then
+            return ""
+          end
+    
+          if status == "completed" then
+            if conclusion == "success" or conclusion == "neutral" or conclusion == "skipped" then
+              return "✓"
+            else
+              return "✗"
+            end
+          elseif status == "expected" or status == "in_progress" or status == "pending" or
+                 status == "queued" or status == "requested" or status == "waiting" then
+            return "⏱"
+          else
+            return "✗"
+          end
+        end
+    
+        require('lualine').setup({
+          sections = {
+            lualine_b = { 'branch', gh_run_status, 'diff', 'diagnostics' },
+          }
+        })
+      end,
+    }
+<
+For more information about Github's `status` and `conclusion`, consult the
+official documentation:
+https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/about-status-checks#check-statuses-and-conclusions
+
+You can also find lualine's default configuration:
+https://github.com/nvim-lualine/lualine.nvim/tree/edf4b24861fa5d586058ff2c9e8982bb971f7098?tab=readme-ov-file#default-configuration
+
+==============================================================================
+6. Health Check                                   *gh-run-status-health-check*
+
+Run `:checkhealth gh-run-status` to verify that all dependencies are properly
+installed.
+
+==============================================================================
+7. Compatibility                                 *gh-run-status-compatibility*
+
+This plugin has only been tested on macOS. Contributions and help testing on
+other platforms are welcome!
+
+==============================================================================
+8. Acknowledgements                             *gh-run-status-acknowledgements*
+
+This plugin was entirely written with assistance from Claude 3.7 Sonnet.
+Contributions, suggestions, and improvements are greatly welcome!
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
