@@ -40,18 +40,18 @@ local function check_github_status(path, branch, cb)
   )
 end
 
-local function watch_status(path, branch, abort_signal)
+local function watch_status(path, branch, abort_signal, sleep_duration)
   local function next()
     status_cache[path].accessed = false
 
     local timer = vim.uv.new_timer()
-    timer:start(10000, 0, function()
+    timer:start(sleep_duration, 0, function()
       if abort_signal.abort then
         return
       end
 
       if status_cache[path].accessed then
-        watch_status(path, branch, abort_signal)
+        watch_status(path, branch, abort_signal, sleep_duration)
       else
         status_cache[path] = nil
       end
@@ -90,7 +90,7 @@ local function watch_status(path, branch, abort_signal)
   end
 end
 
-local function watch_branch(path)
+local function watch_branch(path, sleep_duration)
   vim.system(
     { "git", "rev-parse", "--abbrev-ref", "HEAD" },
     { cwd = path },
@@ -104,9 +104,9 @@ local function watch_branch(path)
       branch_cache[path].accessed = false
 
       local timer = vim.uv.new_timer()
-      timer:start(1000, 0, function()
+      timer:start(sleep_duration, 0, function()
         if branch_cache[path].accessed then
-          watch_branch(path)
+          watch_branch(path, sleep_duration)
         else
           branch_cache[path] = nil
         end
@@ -115,7 +115,7 @@ local function watch_branch(path)
   )
 end
 
-function M.get(path)
+local function get(path, watch_branch_sleep_duration, watch_status_sleep_duration)
   if branch_cache[path] then
     branch_cache[path].accessed = true
   else
@@ -123,7 +123,7 @@ function M.get(path)
       branch = nil,
       accessed = true,
     }
-    watch_branch(path)
+    watch_branch(path, watch_branch_sleep_duration)
   end
 
   if status_cache[path] then
@@ -147,11 +147,23 @@ function M.get(path)
     end
 
     local abort_signal = { abort = false }
-    watch_status(path, branch_cache[path].branch, abort_signal)
+    watch_status(path, branch_cache[path].branch, abort_signal, watch_status_sleep_duration)
     status_cache[path].abort_signal = abort_signal
   end
 
   return status_cache[path].status, status_cache[path].conclusion
+end
+
+function M.create_client(opts)
+  local merged_opts = vim.tbl_extend(
+    "force",
+    { watch_branch_sleep_duration = 1000, watch_status_sleep_duration = 10000 },
+    opts or {}
+  )
+
+  return function(path)
+    return get(path, merged_opts.watch_branch_sleep_duration, merged_opts.watch_status_sleep_duration)
+  end
 end
 
 return M
