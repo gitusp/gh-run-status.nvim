@@ -154,7 +154,7 @@ local function get(path, watch_branch_sleep_duration, watch_status_sleep_duratio
   return status_cache[path].status, status_cache[path].conclusion
 end
 
-function M.create_client(opts)
+function M.create_getter(opts)
   local merged_opts = vim.tbl_extend(
     "force",
     { watch_branch_sleep_duration = 1000, watch_status_sleep_duration = 10000 },
