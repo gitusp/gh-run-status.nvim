@@ -74,15 +74,15 @@ sequenceDiagram
                 Status Watcher->>Server: request
                 alt reasonable response
                     Server->>Status Watcher: result
-                    Status Watcher->>Status Cache: success or fail
+                    Status Watcher->>Status Cache: set status and conclusion
                 else non-recoverable error
                     Server->>Status Watcher: error
-                    Status Watcher->>Status Cache: set status as nil
+                    Status Watcher->>Status Cache: clear status and conclusion
                 else
                     Status Watcher-->Status Watcher: noop due to the error is temporal
                 end
             else
-                Status Watcher->>Status Cache: set status as nil
+                Status Watcher->>Status Cache: clear status and conclusion
             end
         end
         Status Watcher->>Status Cache: clear accessed flag
