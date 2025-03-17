@@ -4,10 +4,10 @@ local local_cache = {}
 
 local remote_cache = {}
 
-local function get_repo_url(path, cb)
+local function get_repo_url(repo_root, cb)
   vim.system(
     { "git", "config", "--get", "remote.origin.url" },
-    { cwd = path },
+    { cwd = repo_root },
     function(result)
       if result.code ~= 0 then
         cb(nil)
@@ -19,10 +19,10 @@ local function get_repo_url(path, cb)
   )
 end
 
-local function check_github_status(path, branch, cb)
+local function check_github_status(repo_root, branch, cb)
   vim.system(
     { "gh", "run", "list", "--branch", branch, "--limit", "1", "--json", "status,conclusion" },
-    { cwd = path },
+    { cwd = repo_root },
     function(result)
       if result.code ~= 0 then
         cb(nil)
@@ -40,9 +40,9 @@ local function check_github_status(path, branch, cb)
   )
 end
 
-local function watch_status(path, branch, abort_signal, sleep_duration)
+local function watch_remote(repo_root, branch, abort_signal, sleep_duration)
   local function next()
-    remote_cache[path].accessed = false
+    remote_cache[repo_root].accessed = false
 
     local timer = vim.uv.new_timer()
     timer:start(sleep_duration, 0, function()
@@ -50,55 +50,61 @@ local function watch_status(path, branch, abort_signal, sleep_duration)
         return
       end
 
-      if remote_cache[path].accessed then
-        watch_status(path, branch, abort_signal, sleep_duration)
+      if remote_cache[repo_root].accessed then
+        watch_remote(repo_root, branch, abort_signal, sleep_duration)
       else
-        remote_cache[path] = nil
+        remote_cache[repo_root] = nil
       end
     end)
   end
 
-  if branch then
-    get_repo_url(
-      path,
-      function(repo_url)
-        if abort_signal.abort then
-          return
-        end
-
-        if repo_url and repo_url:match("github.com") then
-          check_github_status(path, branch, function(status_result)
-            if abort_signal.abort then
-              return
-            end
-
-            if status_result then
-              remote_cache[path].status = status_result.status
-              remote_cache[path].conclusion = status_result.conclusion
-            end
-            next()
-          end)
-        else
-          remote_cache[path].status = nil
-          remote_cache[path].conclusion = nil
-          next()
-        end
+  get_repo_url(
+    repo_root,
+    function(repo_url)
+      if abort_signal.abort then
+        return
       end
-    )
-  else
-    next()
-  end
+
+      if repo_url and repo_url:match("github.com") then
+        check_github_status(repo_root, branch, function(status_result)
+          if abort_signal.abort then
+            return
+          end
+
+          if status_result then
+            remote_cache[repo_root].data = status_result
+          end
+          next()
+        end)
+      else
+        remote_cache[repo_root].data = nil
+        next()
+      end
+    end
+  )
 end
 
-local function watch_branch(path, sleep_duration)
+local function watch_local(path, sleep_duration)
   vim.system(
-    { "git", "rev-parse", "--abbrev-ref", "HEAD" },
+    { "git", "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD" },
     { cwd = path },
     function(obj)
       if obj.code == 0 then
-        local_cache[path].branch = obj.stdout:gsub("%s+$", "")
+        local lines = vim.split(obj.stdout, '\n')
+        local repo_root = lines[1]:gsub("%s+$", "")
+        local branch = lines[2]:gsub("%s+$", "")
+
+        if local_cache[path].data
+          and (local_cache[path].data.repo_root ~= repo_root or local_cache[path].data.branch ~= branch)
+          and remote_cache[local_cache[path].data.repo_root]
+        then
+          remote_cache[local_cache[path].data.repo_root].abort_signal.abort = true
+          remote_cache[local_cache[path].data.repo_root] = nil
+        end
+
+        local_cache[path].data = { repo_root = repo_root, branch = branch }
       else
-        local_cache[path].branch = nil
+        local_cache[path].data = nil
       end
 
       local_cache[path].accessed = false
@@ -106,7 +112,7 @@ local function watch_branch(path, sleep_duration)
       local timer = vim.uv.new_timer()
       timer:start(sleep_duration, 0, function()
         if local_cache[path].accessed then
-          watch_branch(path, sleep_duration)
+          watch_local(path, sleep_duration)
         else
           local_cache[path] = nil
         end
@@ -115,54 +121,49 @@ local function watch_branch(path, sleep_duration)
   )
 end
 
-local function get(path, watch_branch_sleep_duration, watch_status_sleep_duration)
+local function get(path, watch_local_sleep_duration, watch_remote_sleep_duration)
   if local_cache[path] then
     local_cache[path].accessed = true
   else
     local_cache[path] = {
-      branch = nil,
+      data = nil,
       accessed = true,
     }
-    watch_branch(path, watch_branch_sleep_duration)
+    watch_local(path, watch_local_sleep_duration)
   end
 
-  if remote_cache[path] then
-    remote_cache[path].accessed = true
-  else
-    remote_cache[path] = {
-      branch = nil,
-      status = nil,
-      conclusion = nil,
-      accessed = true,
-    }
-  end
+  if local_cache[path].data then
+    local repo_root = local_cache[path].data.repo_root
 
-  if local_cache[path].branch ~= remote_cache[path].branch then
-    remote_cache[path].branch = local_cache[path].branch
-    remote_cache[path].status = nil
-    remote_cache[path].conclusion = nil
-
-    if remote_cache[path].abort_signal then
-      remote_cache[path].abort_signal.abort = true
+    if remote_cache[repo_root] then
+      remote_cache[repo_root].accessed = true
+    else
+      local abort_signal = { abort = false }
+      remote_cache[repo_root] = {
+        data = nil,
+        abort_signal = abort_signal,
+        accessed = true,
+      }
+      watch_remote(repo_root, local_cache[path].data.branch, abort_signal, watch_remote_sleep_duration)
     end
 
-    local abort_signal = { abort = false }
-    watch_status(path, local_cache[path].branch, abort_signal, watch_status_sleep_duration)
-    remote_cache[path].abort_signal = abort_signal
+    if remote_cache[repo_root].data then
+      return remote_cache[repo_root].data.status, remote_cache[repo_root].data.conclusion
+    end
   end
 
-  return remote_cache[path].status, remote_cache[path].conclusion
+  return nil, nil
 end
 
 function M.create_getter(opts)
   local merged_opts = vim.tbl_extend(
     "force",
-    { watch_branch_sleep_duration = 1000, watch_status_sleep_duration = 10000 },
+    { watch_local_sleep_duration = 1000, watch_remote_sleep_duration = 10000 },
     opts or {}
   )
 
   return function(path)
-    return get(path, merged_opts.watch_branch_sleep_duration, merged_opts.watch_status_sleep_duration)
+    return get(path, merged_opts.watch_local_sleep_duration, merged_opts.watch_remote_sleep_duration)
   end
 end
 
