@@ -41,10 +41,6 @@ sequenceDiagram
     loop immediate
         Local Git Watcher->>Environment: fetch repository info
         Environment->>Local Git Watcher: return repository info
-        opt branch or git_root changed
-            Local Git Watcher->>Remote Git Watcher: abort
-            Local Git Watcher->>Remote Git Cache: clear
-        end
         alt git info presents
             Local Git Watcher->>Local Git Cache: set info
         else
