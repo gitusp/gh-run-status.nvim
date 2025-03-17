@@ -47,8 +47,8 @@ function M.check()
 
   -- Also provide info about configuration
   info("Plugin configuration:")
-  info("- Default watch_branch_sleep_duration: 1000ms")
-  info("- Default watch_status_sleep_duration: 10000ms")
+  info("- Default watch_local_sleep_duration: 1000ms")
+  info("- Default watch_remote_sleep_duration: 10000ms")
   info("Adjust these values with M.create_getter({...})")
 end
 

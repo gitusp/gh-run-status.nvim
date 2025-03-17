@@ -50,8 +50,8 @@ Basic usage:
 >lua
     -- Create a getter function with custom options (optional)
     local get_status = require('gh-run-status').create_getter({
-      watch_branch_sleep_duration = 1000,  -- Check branch changes every 1 second
-      watch_status_sleep_duration = 10000, -- Check status changes every 10 seconds
+      watch_local_sleep_duration = 1000,  -- Check local repository changes every 1 second
+      watch_remote_sleep_duration = 10000, -- Check Github status changes every 10 seconds
     })
     
     -- Get current GitHub Actions status
