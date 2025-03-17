@@ -40,16 +40,16 @@ local function check_github_status(repo_root, branch, cb)
   )
 end
 
-local function watch_remote(repo_root, branch, sleep_duration)
+local function watch_remote(key, repo_root, branch, sleep_duration)
   local function next()
-    remote_cache[repo_root].accessed = false
+    remote_cache[key].accessed = false
 
     local timer = vim.uv.new_timer()
     timer:start(sleep_duration, 0, function()
-      if remote_cache[repo_root].accessed then
-        watch_remote(repo_root, branch, sleep_duration)
+      if remote_cache[key].accessed then
+        watch_remote(key, repo_root, branch, sleep_duration)
       else
-        remote_cache[repo_root] = nil
+        remote_cache[key] = nil
       end
     end)
   end
@@ -60,12 +60,12 @@ local function watch_remote(repo_root, branch, sleep_duration)
       if repo_url and repo_url:match("github.com") then
         check_github_status(repo_root, branch, function(status_result)
           if status_result then
-            remote_cache[repo_root].data = status_result
+            remote_cache[key].data = status_result
           end
           next()
         end)
       else
-        remote_cache[repo_root].data = nil
+        remote_cache[key].data = nil
         next()
       end
     end
@@ -113,20 +113,20 @@ local function get(path, watch_local_sleep_duration, watch_remote_sleep_duration
   end
 
   if local_cache[path].data then
-    local repo_root = local_cache[path].data.repo_root
+    local key = local_cache[path].data.repo_root .. "//" .. local_cache[path].data.branch
 
-    if remote_cache[repo_root] then
-      remote_cache[repo_root].accessed = true
+    if remote_cache[key] then
+      remote_cache[key].accessed = true
     else
-      remote_cache[repo_root] = {
+      remote_cache[key] = {
         data = nil,
         accessed = true,
       }
-      watch_remote(repo_root, local_cache[path].data.branch, watch_remote_sleep_duration)
+      watch_remote(key, local_cache[path].data.repo_root, local_cache[path].data.branch, watch_remote_sleep_duration)
     end
 
-    if remote_cache[repo_root].data then
-      return remote_cache[repo_root].data.status, remote_cache[repo_root].data.conclusion
+    if remote_cache[key].data then
+      return remote_cache[key].data.status, remote_cache[key].data.conclusion
     end
   end
 
