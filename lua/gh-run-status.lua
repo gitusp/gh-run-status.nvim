@@ -40,18 +40,14 @@ local function check_github_status(repo_root, branch, cb)
   )
 end
 
-local function watch_remote(repo_root, branch, abort_signal, sleep_duration)
+local function watch_remote(repo_root, branch, sleep_duration)
   local function next()
     remote_cache[repo_root].accessed = false
 
     local timer = vim.uv.new_timer()
     timer:start(sleep_duration, 0, function()
-      if abort_signal.abort then
-        return
-      end
-
       if remote_cache[repo_root].accessed then
-        watch_remote(repo_root, branch, abort_signal, sleep_duration)
+        watch_remote(repo_root, branch, sleep_duration)
       else
         remote_cache[repo_root] = nil
       end
@@ -61,16 +57,8 @@ local function watch_remote(repo_root, branch, abort_signal, sleep_duration)
   get_repo_url(
     repo_root,
     function(repo_url)
-      if abort_signal.abort then
-        return
-      end
-
       if repo_url and repo_url:match("github.com") then
         check_github_status(repo_root, branch, function(status_result)
-          if abort_signal.abort then
-            return
-          end
-
           if status_result then
             remote_cache[repo_root].data = status_result
           end
@@ -93,14 +81,6 @@ local function watch_local(path, sleep_duration)
         local lines = vim.split(obj.stdout, '\n')
         local repo_root = lines[1]:gsub("%s+$", "")
         local branch = lines[2]:gsub("%s+$", "")
-
-        if local_cache[path].data
-          and (local_cache[path].data.repo_root ~= repo_root or local_cache[path].data.branch ~= branch)
-          and remote_cache[local_cache[path].data.repo_root]
-        then
-          remote_cache[local_cache[path].data.repo_root].abort_signal.abort = true
-          remote_cache[local_cache[path].data.repo_root] = nil
-        end
 
         local_cache[path].data = { repo_root = repo_root, branch = branch }
       else
@@ -138,13 +118,11 @@ local function get(path, watch_local_sleep_duration, watch_remote_sleep_duration
     if remote_cache[repo_root] then
       remote_cache[repo_root].accessed = true
     else
-      local abort_signal = { abort = false }
       remote_cache[repo_root] = {
         data = nil,
-        abort_signal = abort_signal,
         accessed = true,
       }
-      watch_remote(repo_root, local_cache[path].data.branch, abort_signal, watch_remote_sleep_duration)
+      watch_remote(repo_root, local_cache[path].data.branch, watch_remote_sleep_duration)
     end
 
     if remote_cache[repo_root].data then
