@@ -1,8 +1,8 @@
 local M = {}
 
-local branch_cache = {}
+local local_cache = {}
 
-local status_cache = {}
+local remote_cache = {}
 
 local function get_repo_url(path, cb)
   vim.system(
@@ -42,7 +42,7 @@ end
 
 local function watch_status(path, branch, abort_signal, sleep_duration)
   local function next()
-    status_cache[path].accessed = false
+    remote_cache[path].accessed = false
 
     local timer = vim.uv.new_timer()
     timer:start(sleep_duration, 0, function()
@@ -50,10 +50,10 @@ local function watch_status(path, branch, abort_signal, sleep_duration)
         return
       end
 
-      if status_cache[path].accessed then
+      if remote_cache[path].accessed then
         watch_status(path, branch, abort_signal, sleep_duration)
       else
-        status_cache[path] = nil
+        remote_cache[path] = nil
       end
     end)
   end
@@ -73,14 +73,14 @@ local function watch_status(path, branch, abort_signal, sleep_duration)
             end
 
             if status_result then
-              status_cache[path].status = status_result.status
-              status_cache[path].conclusion = status_result.conclusion
+              remote_cache[path].status = status_result.status
+              remote_cache[path].conclusion = status_result.conclusion
             end
             next()
           end)
         else
-          status_cache[path].status = nil
-          status_cache[path].conclusion = nil
+          remote_cache[path].status = nil
+          remote_cache[path].conclusion = nil
           next()
         end
       end
@@ -96,19 +96,19 @@ local function watch_branch(path, sleep_duration)
     { cwd = path },
     function(obj)
       if obj.code == 0 then
-        branch_cache[path].branch = obj.stdout:gsub("%s+$", "")
+        local_cache[path].branch = obj.stdout:gsub("%s+$", "")
       else
-        branch_cache[path].branch = nil
+        local_cache[path].branch = nil
       end
 
-      branch_cache[path].accessed = false
+      local_cache[path].accessed = false
 
       local timer = vim.uv.new_timer()
       timer:start(sleep_duration, 0, function()
-        if branch_cache[path].accessed then
+        if local_cache[path].accessed then
           watch_branch(path, sleep_duration)
         else
-          branch_cache[path] = nil
+          local_cache[path] = nil
         end
       end)
     end
@@ -116,20 +116,20 @@ local function watch_branch(path, sleep_duration)
 end
 
 local function get(path, watch_branch_sleep_duration, watch_status_sleep_duration)
-  if branch_cache[path] then
-    branch_cache[path].accessed = true
+  if local_cache[path] then
+    local_cache[path].accessed = true
   else
-    branch_cache[path] = {
+    local_cache[path] = {
       branch = nil,
       accessed = true,
     }
     watch_branch(path, watch_branch_sleep_duration)
   end
 
-  if status_cache[path] then
-    status_cache[path].accessed = true
+  if remote_cache[path] then
+    remote_cache[path].accessed = true
   else
-    status_cache[path] = {
+    remote_cache[path] = {
       branch = nil,
       status = nil,
       conclusion = nil,
@@ -137,21 +137,21 @@ local function get(path, watch_branch_sleep_duration, watch_status_sleep_duratio
     }
   end
 
-  if branch_cache[path].branch ~= status_cache[path].branch then
-    status_cache[path].branch = branch_cache[path].branch
-    status_cache[path].status = nil
-    status_cache[path].conclusion = nil
+  if local_cache[path].branch ~= remote_cache[path].branch then
+    remote_cache[path].branch = local_cache[path].branch
+    remote_cache[path].status = nil
+    remote_cache[path].conclusion = nil
 
-    if status_cache[path].abort_signal then
-      status_cache[path].abort_signal.abort = true
+    if remote_cache[path].abort_signal then
+      remote_cache[path].abort_signal.abort = true
     end
 
     local abort_signal = { abort = false }
-    watch_status(path, branch_cache[path].branch, abort_signal, watch_status_sleep_duration)
-    status_cache[path].abort_signal = abort_signal
+    watch_status(path, local_cache[path].branch, abort_signal, watch_status_sleep_duration)
+    remote_cache[path].abort_signal = abort_signal
   end
 
-  return status_cache[path].status, status_cache[path].conclusion
+  return remote_cache[path].status, remote_cache[path].conclusion
 end
 
 function M.create_getter(opts)
