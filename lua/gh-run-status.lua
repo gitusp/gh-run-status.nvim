@@ -4,21 +4,6 @@ local local_cache = {}
 
 local remote_cache = {}
 
-local function get_repo_url(repo_root, cb)
-  vim.system(
-    { "git", "config", "--get", "remote.origin.url" },
-    { cwd = repo_root },
-    function(result)
-      if result.code ~= 0 then
-        cb(nil)
-        return
-      end
-
-      cb(result.stdout:gsub("%s+$", ""))
-    end
-  )
-end
-
 local function check_github_status(repo_root, branch, cb)
   vim.system(
     { "gh", "run", "list", "--branch", branch, "--limit", "1", "--json", "status,conclusion" },
@@ -40,63 +25,81 @@ local function check_github_status(repo_root, branch, cb)
   )
 end
 
-local function watch_remote(key, repo_root, branch, sleep_duration)
-  local function next()
+local function watch_remote(key, data, sleep_duration)
+  -- TODO: Implement more drivers
+  check_github_status(data.repo_root, data.branch, function(status_result)
+    if status_result then
+      remote_cache[key].data = status_result
+    end
+
     remote_cache[key].accessed = false
 
     local timer = vim.uv.new_timer()
     timer:start(sleep_duration, 0, function()
       if remote_cache[key].accessed then
-        watch_remote(key, repo_root, branch, sleep_duration)
+        watch_remote(key, data, sleep_duration)
       else
         remote_cache[key] = nil
       end
     end)
+  end)
+end
+
+local function watch_local(path, sleep_duration)
+  local rev_parse_result
+  local get_config_result
+
+  local function next()
+    if rev_parse_result.code == 0 and get_config_result.code == 0 then
+      local repo_url = get_config_result.stdout:gsub("%s+$", "")
+      local driver = repo_url:match("github.com") and "github" or nil
+
+      if driver then
+        local lines = vim.split(rev_parse_result.stdout, '\n')
+        local repo_root = lines[1]:gsub("%s+$", "")
+        local branch = lines[2]:gsub("%s+$", "")
+
+        local_cache[path].data = { repo_root = repo_root, driver = driver, branch = branch }
+      else
+        local_cache[path].data = nil
+      end
+    else
+      local_cache[path].data = nil
+    end
+
+    local_cache[path].accessed = false
+
+    local timer = vim.uv.new_timer()
+    timer:start(sleep_duration, 0, function()
+      if local_cache[path].accessed then
+        watch_local(path, sleep_duration)
+      else
+        local_cache[path] = nil
+      end
+    end)
   end
 
-  get_repo_url(
-    repo_root,
-    function(repo_url)
-      if repo_url and repo_url:match("github.com") then
-        check_github_status(repo_root, branch, function(status_result)
-          if status_result then
-            remote_cache[key].data = status_result
-          end
-          next()
-        end)
-      else
-        remote_cache[key].data = nil
+  vim.system(
+    { "git", "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD" },
+    { cwd = path },
+    function(result)
+      rev_parse_result = result
+
+      if get_config_result then
         next()
       end
     end
   )
-end
 
-local function watch_local(path, sleep_duration)
   vim.system(
-    { "git", "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD" },
+    { "git", "config", "--get", "remote.origin.url" },
     { cwd = path },
-    function(obj)
-      if obj.code == 0 then
-        local lines = vim.split(obj.stdout, '\n')
-        local repo_root = lines[1]:gsub("%s+$", "")
-        local branch = lines[2]:gsub("%s+$", "")
+    function(result)
+      get_config_result = result
 
-        local_cache[path].data = { repo_root = repo_root, branch = branch }
-      else
-        local_cache[path].data = nil
+      if rev_parse_result then
+        next()
       end
-
-      local_cache[path].accessed = false
-
-      local timer = vim.uv.new_timer()
-      timer:start(sleep_duration, 0, function()
-        if local_cache[path].accessed then
-          watch_local(path, sleep_duration)
-        else
-          local_cache[path] = nil
-        end
-      end)
     end
   )
 end
@@ -113,7 +116,10 @@ local function get(path, watch_local_sleep_duration, watch_remote_sleep_duration
   end
 
   if local_cache[path].data then
-    local key = local_cache[path].data.repo_root .. "//" .. local_cache[path].data.branch
+    local key = table.concat(
+      { local_cache[path].data.driver, local_cache[path].data.repo_root, local_cache[path].data.branch },
+      "\n"
+    )
 
     if remote_cache[key] then
       remote_cache[key].accessed = true
@@ -122,7 +128,7 @@ local function get(path, watch_local_sleep_duration, watch_remote_sleep_duration
         data = nil,
         accessed = true,
       }
-      watch_remote(key, local_cache[path].data.repo_root, local_cache[path].data.branch, watch_remote_sleep_duration)
+      watch_remote(key, local_cache[path].data, watch_remote_sleep_duration)
     end
 
     if remote_cache[key].data then
